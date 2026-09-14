@@ -56,9 +56,13 @@ Put these in `.pi/shell-background.json` (project) or `<agentDir>/shell-backgrou
 
 `autoBackgroundMs` is how long a foreground command may run before it auto-backgrounds; set it to `0` to disable auto-background (explicit `background: true` still works). `PIFY_SHELL_BG_MS` overrides it for one run or in CI. `tailBytes` bounds how much of a job's log a status result shows. Bad values fall back to the defaults with a warning rather than taking the tool down.
 
-## Coexistence
+## Coexistence with @pify/pretty
 
-This package owns the `bash` tool's execution. If you also run another extension that re-registers `bash` (a renderer like `@pify/pretty`, say), whichever loads last wins — install order decides. `@pify/pretty` only changes rendering and leaves execution alone, so the usual advice is to let this package load after it.
+Both this package and `@pify/pretty` re-register `bash`: this one to change its *execution* (async), pretty to change its *rendering* (compact, syntax-highlit). pi's `registerTool` is last-write-wins and gives an extension no way to read or wrap another's registered tool, so the two cannot be merged — whichever loads last wins the whole `bash` tool.
+
+**Load `@pify/shell-background` after `@pify/pretty`.** Async bash is the reason to install this package, so it should own execution; pretty keeps rendering every other tool (`read`, `edit`, `grep`, `write`, `ls`, `find`) — only its `bash`-specific rendering yields, and you still get pi's default bash view here. If pretty loads last instead, *this package's async execution is lost* and bash reverts to blocking — the outcome to avoid.
+
+(A future pi API to compose registered tools would let both apply at once; today none exists.)
 
 ## License
 
