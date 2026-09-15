@@ -41,6 +41,11 @@ export function spawnToFile(
 ): Spawned {
   // Append so a re-attach or racing read never clips output already written.
   const out = createWriteStream(logPath, { flags: "a" });
+  // A write stream with no 'error' listener turns any disk error (ENOSPC,
+  // EACCES) or a stray write-after-end into an uncaught exception that takes the
+  // whole pi host down. Losing a log line is survivable; crashing the host is
+  // not — so swallow it here.
+  out.on("error", () => {});
 
   let child;
   try {

@@ -36,7 +36,10 @@ test("a long command keeps running until the tree is killed", async () => {
   try {
     const log = join(dir, "l.log");
     const { shell: sh, args } = shell();
-    const s = spawnToFile(sh, args, "sleep 30", dir, process.env, log);
+    // A bounded sleep, not `sleep 30`: if a platform's tree-kill is slow the
+    // child still self-terminates soon after, so the test runner can always
+    // exit instead of hanging on an orphaned process (Windows+bun flake).
+    const s = spawnToFile(sh, args, "sleep 8", dir, process.env, log);
     let exited = false;
     void s.exit.then(() => {
       exited = true;
@@ -44,8 +47,18 @@ test("a long command keeps running until the tree is killed", async () => {
     await sleep(300);
     assert.equal(exited, false, "still running after 300ms");
     killTree(s.pid);
-    const outcome = await Promise.race([s.exit.then(() => "exited"), sleep(4000).then(() => "timeout")]);
+    // Cancelable race timer so the losing branch never keeps the event loop
+    // alive after the winner resolves.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<string>((r) => {
+      timer = setTimeout(() => r("timeout"), 5000);
+    });
+    const outcome = await Promise.race([s.exit.then(() => "exited"), timeout]);
+    clearTimeout(timer);
     assert.equal(outcome, "exited", "killTree terminated the command");
+    // Reap the child before leaving the test so the runner is not left waiting
+    // on a live process handle.
+    await s.exit.catch(() => {});
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

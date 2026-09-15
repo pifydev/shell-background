@@ -47,6 +47,7 @@ import { DEFAULT_SETTINGS, resolveSettings, type ShellBgSettings } from "../src/
 import { backgroundedResult, deliveryMessage, DELIVERY_TYPE } from "../src/pending.ts";
 import { formatResult, formatList, header } from "../src/format.ts";
 import { buildWidgetLines } from "../src/widget.ts";
+import { isFinished } from "../src/types.ts";
 import type { Job } from "../src/types.ts";
 
 type UiContext = ExtensionContext;
@@ -236,6 +237,19 @@ export default function shellBackground(pi: ExtensionAPI) {
 
       if (outcome === "auto") {
         scheduleDelivery(job, settle);
+        // A timeout the caller set still applies once the command is in the
+        // background: schedule the kill for the time it has left so the deadline
+        // the model expects is honoured rather than silently dropped. This timer
+        // deliberately outlives the `finally` below, so it is not in `timers`.
+        if (params.timeout && params.timeout > 0) {
+          const remaining = params.timeout * 1000 - (Date.now() - job.startedAt);
+          const killAt = setTimeout(() => {
+            if (job.status !== "running") return;
+            job.killedByUs = true;
+            killTree(job.pid);
+          }, Math.max(0, remaining));
+          killAt.unref?.();
+        }
         const r = backgroundedResult({
           id: job.id,
           command,
@@ -314,8 +328,13 @@ export default function shellBackground(pi: ExtensionAPI) {
         const known = registry.all().map((j) => j.id).join(", ") || "(none)";
         return { content: [{ type: "text", text: `No job "${id}". Known: ${known}` }], details: {}, isError: true };
       }
-      // Reading marks it collected so it will not also be delivered unasked.
-      job.delivered = true;
+      // Reading a finished job marks it collected so it will not also be
+      // delivered unasked. A still-running poll must never do this: setting
+      // delivered here would permanently cancel the promised auto-delivery.
+      if (isFinished(job)) {
+        job.delivered = true;
+        registry.persist(job);
+      }
       return {
         content: [{ type: "text", text: formatResult(job, settings.tailBytes) }],
         details: { id: job.id, status: job.status, exitCode: job.exitCode },
