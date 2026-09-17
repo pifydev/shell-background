@@ -47,6 +47,64 @@ test("persist writes a sidecar and load restores + continues the counter", () =>
   }
 });
 
+test("a running record from another host pid is orphaned, not adopted (finding f072)", () => {
+  const dir = baseDir();
+  try {
+    // A sidecar left by a different (or since-crashed) host, whose pid happens to
+    // be live and — worst case — is *ours*. It must never be treated as running,
+    // or session_shutdown would killTree a pid this host did not spawn.
+    const foreign = {
+      id: "bg-1",
+      command: "sleep 999",
+      cwd: "/x",
+      pid: process.pid,
+      hostPid: process.pid + 100_000, // a host that is not this one
+      status: "running",
+      exitCode: null,
+      signal: null,
+      logPath: join(dir, "logs", "bg-1.log"),
+      startedAt: Date.now(),
+      endedAt: null,
+      auto: false,
+      delivered: false,
+    };
+    writeFileSync(join(dir, "bg-1.json"), JSON.stringify(foreign));
+    const r = new JobRegistry(dir);
+    r.load();
+    assert.equal(r.get("bg-1")?.status, "orphaned", "a foreign-host running record is marked orphaned");
+    assert.equal(r.running().length, 0, "and excluded from running() so it is never killed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a running record with no hostPid (pre-upgrade) is treated as foreign", () => {
+  const dir = baseDir();
+  try {
+    const old = {
+      id: "bg-1",
+      command: "x",
+      cwd: "/x",
+      pid: process.pid,
+      status: "running",
+      exitCode: null,
+      signal: null,
+      logPath: join(dir, "logs", "bg-1.log"),
+      startedAt: Date.now(),
+      endedAt: null,
+      auto: false,
+      delivered: false,
+    };
+    writeFileSync(join(dir, "bg-1.json"), JSON.stringify(old));
+    const r = new JobRegistry(dir);
+    r.load();
+    assert.equal(r.get("bg-1")?.status, "orphaned");
+    assert.equal(r.running().length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("load tolerates a corrupt sidecar", () => {
   const dir = baseDir();
   try {

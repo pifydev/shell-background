@@ -61,9 +61,9 @@ export function backgroundedResult(input: BackgroundedInput): BackgroundedResult
         "with no id lists everything still running.",
       ]
     : [
-        "This is a headless run: nothing is delivered after your turn ends. Call",
-        `${input.collectWith} with id "${input.id}" again in this same turn until it reports finished —`,
-        "do not end your turn expecting the result to arrive on its own.",
+        "This is a headless run: nothing is delivered after your turn ends. Collect it",
+        `in this same turn — ${input.collectWith} {id: "${input.id}", wait: 60} blocks until it`,
+        "finishes (or the wait elapses); do not end your turn expecting the result to arrive on its own.",
       ];
   return {
     text: [head, line, "", ...tail].join("\n"),

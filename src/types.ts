@@ -3,7 +3,7 @@
  * No imports from pi packages: src/ typechecks and unit-tests standalone.
  */
 
-export type JobStatus = "running" | "done" | "failed" | "killed";
+export type JobStatus = "running" | "done" | "failed" | "killed" | "orphaned";
 
 export interface Job {
   /** Short session-monotonic id, e.g. "bg-1". */
@@ -12,6 +12,14 @@ export interface Job {
   cwd: string;
   /** OS pid of the shell process; null before spawn or if spawn failed. */
   pid: number | null;
+  /**
+   * pid of the pi host that spawned this job. A record whose hostPid is not the
+   * current process was written by another (or a since-crashed) host: its pid is
+   * not ours to signal, so it is never treated as running here. A `/reload`
+   * keeps the same host pid, so genuine reload survivors still adopt. Optional
+   * so a pre-upgrade sidecar (no hostPid) is simply treated as foreign.
+   */
+  hostPid?: number;
   status: JobStatus;
   /** Process exit code, once finished. */
   exitCode: number | null;

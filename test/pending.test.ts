@@ -16,7 +16,8 @@ test("headless: no delivery, must collect within the turn", () => {
   const r = backgroundedResult({ ...base, elapsedMs: 30_000, auto: true, interactive: false });
   assert.equal(r.details.pollRequired, true);
   assert.match(r.text, /headless run/);
-  assert.match(r.text, /again in this same turn/);
+  assert.match(r.text, /in this same turn/);
+  assert.match(r.text, /wait: 60/, "points at the blocking wait option");
   assert.ok(!/delivered here automatically/.test(r.text));
 });
 

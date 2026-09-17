@@ -21,11 +21,13 @@ export function header(job: Job): string {
   const verdict =
     job.status === "running"
       ? "running"
-      : job.signal
-        ? `signal ${job.signal}`
-        : job.status === "killed"
-          ? "killed"
-          : `exit ${job.exitCode ?? "?"}`;
+      : job.status === "orphaned"
+        ? "orphaned (another session)"
+        : job.signal
+          ? `signal ${job.signal}`
+          : job.status === "killed"
+            ? "killed"
+            : `exit ${job.exitCode ?? "?"}`;
   return `[${job.id} · ${job.status} · ${verdict} · ${duration(job)}]`;
 }
 

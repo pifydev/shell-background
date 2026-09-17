@@ -12,7 +12,7 @@ pi's bash tool waits for the command to finish. That is right for `ls` and wrong
 
 ## What it does
 
-It re-registers the `bash` tool with the same shell, working directory and environment — nothing about how a command runs changes — but a different lifecycle:
+It re-registers the `bash` tool with the same shell, working directory, PATH (including pi's managed `fd`/`rg` bin dir) and `PI_*` session variables pi's own bash hands a command — but a different lifecycle:
 
 | Situation | What happens |
 |---|---|
@@ -25,6 +25,7 @@ It re-registers the `bash` tool with the same shell, working directory and envir
 bash { command: "npm run build" }        # returns when done, or auto-backgrounds at 30s
 bash { command: "npm run dev", background: true }   # → "bg-2 started in the background"
 shell_status { id: "bg-2" }              # status + output so far
+shell_status { id: "bg-2", wait: 60 }    # block up to 60s until it finishes (headless collect)
 shell_status                             # list every background command this session
 shell_kill { id: "bg-2" }                # stop it and its whole process tree
 ```
@@ -33,13 +34,15 @@ shell_kill { id: "bg-2" }                # stop it and its whole process tree
 
 ## Delivery, and the headless caveat
 
-When a backgrounded command finishes in an **interactive** session, its result is pushed into the conversation as the next turn — you do not have to poll. Under headless `pi -p` there is nothing to deliver into (the session tears down when the prompt resolves), so **auto-background is disabled there** and only explicit `background: true` applies; collect it with `shell_status` inside the same turn. This is the same delivery rule the rest of the suite lives by.
+When a backgrounded command finishes in an **interactive** session, its result is pushed into the conversation as the next turn — you do not have to poll. Under headless `pi -p` there is nothing to deliver into (the session tears down when the prompt resolves), so **auto-background is disabled there** and only explicit `background: true` applies; collect it within the same turn with `shell_status { id, wait: N }`, which blocks (up to `N` seconds, 0–300) until the command finishes rather than returning immediately. This is the same delivery rule the rest of the suite lives by.
 
 ## How it works
 
 Each command is spawned with its stdout and stderr piped into a single log file, drained on every chunk so nothing is lost no matter how much it prints, and finalized only after the pipes end (with a short grace so a daemonized grandchild that holds a handle open cannot truncate the tail). The process is spawned detached (POSIX) and `unref`'d so a running job never holds the host open, and killed as a whole process tree — `taskkill /T` on Windows, a process-group signal on POSIX — on timeout, abort, `shell_kill`, or session shutdown.
 
-Shell resolution reuses pi's own `getShellConfig` (Git Bash on Windows, `/bin/bash` then `sh` on Unix), so a backgrounded command behaves identically to a foreground one. Jobs are tracked in memory and mirrored to a per-session sidecar under the temp dir, so `shell_status` still answers after a `/reload` and a job whose process has died is reconciled rather than shown as forever-running.
+Shell resolution reuses pi's own `getShellConfig` (Git Bash on Windows, `/bin/bash` then `sh` on Unix) and the environment is rebuilt the way pi's bash builds it (managed bin dir on PATH, `PI_SESSION_ID`/`PI_SESSION_FILE`/`PI_PROVIDER`/`PI_MODEL`/`PI_REASONING_LEVEL` from the session), so a backgrounded command behaves identically to a foreground one.
+
+Jobs are tracked in memory and mirrored to a sidecar under the temp dir, keyed by the pi **session id** — so two sessions in the same directory never see or kill each other's jobs, and the id is stable across a `/reload`. A `/reload` does **not** kill background jobs: pi hands the same host process to a fresh instance, which adopts every still-running job from the sidecars and delivers each one when it finishes (exactly once). Every other way a session ends — quit, or switching to another session — kills its jobs and their whole process trees. Each record also carries the host pid that spawned it: a `running` record left by a different (or crashed) host is surfaced as `orphaned` and never treated as live, so its pid — which may since belong to something unrelated — is never signalled. A job whose process has died is reconciled rather than shown as forever-running, this session's dir is removed on a clean exit, and stray dirs from a crash are swept after seven days.
 
 There are **no runtime dependencies**, and it works on Linux, macOS and Windows.
 

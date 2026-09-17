@@ -16,7 +16,7 @@ import { join } from "node:path";
 import type { Job } from "./types.ts";
 import { isRecord } from "./types.ts";
 
-function isAlive(pid: number | null): boolean {
+export function isAlive(pid: number | null | undefined): boolean {
   if (!pid || pid <= 0) return false;
   try {
     process.kill(pid, 0);
@@ -47,6 +47,11 @@ export class JobRegistry {
     mkdirSync(join(baseDir, "logs"), { recursive: true });
   }
 
+  /** The directory this registry's sidecars and logs live under. */
+  dir(): string {
+    return this.baseDir;
+  }
+
   logPathFor(id: string): string {
     return join(this.baseDir, "logs", `${id}.log`);
   }
@@ -58,6 +63,7 @@ export class JobRegistry {
       command,
       cwd,
       pid: null,
+      hostPid: process.pid,
       status: "running",
       exitCode: null,
       signal: null,
@@ -94,7 +100,28 @@ export class JobRegistry {
     }
   }
 
-  /** Load persisted jobs and settle any whose process has since died. */
+  /** Read one job's sidecar from disk, or null if missing/corrupt. */
+  readSidecar(id: string): Job | null {
+    try {
+      const raw = JSON.parse(readFileSync(join(this.baseDir, `${id}.json`), "utf8"));
+      return isJob(raw) ? raw : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Load persisted jobs and reconcile any still marked running:
+   *
+   *  - a record written by this same host process (a `/reload` keeps the host
+   *    pid) is a genuine survivor — kept running if its pid is still alive so the
+   *    new instance can adopt it, settled to `done` if the process has since died;
+   *  - a record from any other host pid (another session that reused this dir, or
+   *    a crashed one, or a pre-upgrade sidecar with no hostPid) is *not* ours: its
+   *    pid may since belong to something unrelated, so we never treat it as
+   *    running (which would make session_shutdown kill a stranger's pid) — it is
+   *    surfaced as `orphaned` and kept out of running().
+   */
   load(): void {
     let files: string[];
     try {
@@ -108,9 +135,14 @@ export class JobRegistry {
         const raw = JSON.parse(readFileSync(join(this.baseDir, f), "utf8"));
         if (!isJob(raw)) continue;
         const job = raw;
-        if (job.status === "running" && !isAlive(job.pid)) {
-          job.status = "done";
-          job.endedAt = job.endedAt ?? Date.now();
+        if (job.status === "running") {
+          if (job.hostPid !== process.pid) {
+            job.status = "orphaned";
+            job.endedAt = job.endedAt ?? Date.now();
+          } else if (!isAlive(job.pid)) {
+            job.status = "done";
+            job.endedAt = job.endedAt ?? Date.now();
+          }
         }
         this.jobs.set(job.id, job);
         const n = Number(job.id.replace(/^bg-/, ""));
