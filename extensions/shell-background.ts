@@ -47,6 +47,7 @@ import { buildEnv } from "../src/env.ts";
 import { DEFAULT_SETTINGS, resolveSettings, type ShellBgSettings } from "../src/config.ts";
 import { backgroundedResult, deliveryMessage, DELIVERY_TYPE } from "../src/pending.ts";
 import { formatResult, formatList, header } from "../src/format.ts";
+import { sanitizeOutput } from "../src/sanitize.ts";
 import { buildWidgetLines } from "../src/widget.ts";
 import { isFinished } from "../src/types.ts";
 import type { Job } from "../src/types.ts";
@@ -187,7 +188,7 @@ export default function shellBackground(pi: ExtensionAPI) {
   function snapshot(job: Job): ToolResult {
     const tail = readTail(job.logPath, settings.tailBytes);
     return {
-      content: [{ type: "text", text: `${header(job)}\n${tail.text.replace(/\n+$/, "") || "(no output yet)"}` }],
+      content: [{ type: "text", text: `${header(job)}\n${sanitizeOutput(tail.text).replace(/\n+$/, "") || "(no output yet)"}` }],
       details: { id: job.id, status: job.status },
     };
   }
@@ -247,6 +248,27 @@ export default function shellBackground(pi: ExtensionAPI) {
     if (!registry) throw new Error("shell-background not initialized");
     const command = String(params.command ?? "").trim();
     if (!command) return { content: [{ type: "text", text: "Empty command." }], details: {}, isError: true };
+
+    // The cap bounds how many jobs may be alive, not whether a command runs:
+    // an explicit background request over it is refused (the model can still
+    // run the command in the foreground); an auto-background transition over
+    // it is skipped and the command simply stays in the foreground.
+    const liveOthers = (self?: string) => registry!.running().filter((j) => j.id !== self).length;
+    if (params.background && liveOthers() >= settings.maxBackground) {
+      const n = liveOthers();
+      return {
+        content: [
+          {
+            type: "text",
+            text:
+              `${n} background command${n === 1 ? " is" : "s are"} already running (maxBackground = ${settings.maxBackground}). ` +
+              `shell_kill one you no longer need, wait for one with shell_status {id, wait}, or run this in the foreground without background:true.`,
+          },
+        ],
+        details: { running: n, limit: settings.maxBackground },
+        isError: true,
+      };
+    }
 
     const job = registry.create(command, ctx.cwd);
     const { shell, args } = shellArgv();
@@ -316,13 +338,31 @@ export default function shellBackground(pi: ExtensionAPI) {
 
     try {
       const race: Array<Promise<string>> = [settle.then(() => "exit")];
-      if (autoMs > 0) race.push(after(autoMs, "auto"));
       if (params.timeout && params.timeout > 0) race.push(after(params.timeout * 1000, "timeout"));
       if (signal) race.push(abort);
 
-      const outcome = await Promise.race(race);
+      let outcome = await Promise.race(autoMs > 0 ? [...race, after(autoMs, "auto")] : race);
 
-      if (outcome === "exit") return finished(job);
+      // Over the cap, the threshold passes without moving the command: it is
+      // never refused, it just keeps its foreground slot until it ends.
+      let keptForeground = false;
+      if (outcome === "auto" && liveOthers(job.id) >= settings.maxBackground) {
+        keptForeground = true;
+        outcome = await Promise.race(race);
+      }
+
+      if (outcome === "exit") {
+        const r = finished(job);
+        if (keptForeground) {
+          r.content = [
+            {
+              type: "text",
+              text: `${r.content[0]?.text ?? ""}\n\n[kept in the foreground: ${settings.maxBackground} background commands were already running]`,
+            },
+          ];
+        }
+        return r;
+      }
 
       if (outcome === "auto") {
         scheduleDelivery(job, settle);

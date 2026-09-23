@@ -14,7 +14,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -143,6 +143,69 @@ test("polling a running job does not cancel its auto-delivery (bug #1)", async (
     await teardown(h, ctx);
     await rmDir(cwd);
     await rmDir(regDir);
+  }
+});
+
+test("maxBackground: an explicit background request over the cap is refused, not the command", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "sbg-cap1-"));
+  const { id: sid, regDir } = uniqueSession();
+  const h = harness();
+  const ctx = makeCtx(cwd, false, sid);
+  try {
+    mkdirSync(join(cwd, ".pi"), { recursive: true });
+    writeFileSync(join(cwd, ".pi", "shell-background.json"), JSON.stringify({ maxBackground: 1 }));
+    shellBackground(h.pi);
+    await h.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx);
+    const bash = h.tools.get("bash")!;
+
+    const first = await bash.execute("t1", { command: "sleep 2", background: true }, undefined, undefined, ctx);
+    assert.ok(first.details.id, "the first background job starts");
+
+    const second = await bash.execute("t2", { command: "sleep 2", background: true }, undefined, undefined, ctx);
+    assert.equal(second.isError, true, "the second background request is refused");
+    assert.match(String(second.content[0].text), /maxBackground = 1/);
+    assert.equal(second.details.limit, 1);
+
+    // The same command still runs in the foreground: the cap never refuses execution.
+    const fg = await bash.execute("t3", { command: "echo still-runs" }, undefined, undefined, ctx);
+    assert.notEqual(fg.isError, true);
+    assert.match(String(fg.content[0].text), /still-runs/);
+  } finally {
+    await teardown(h, ctx);
+    await rmDir(cwd);
+    await rmDir(regDir);
+  }
+});
+
+test("maxBackground: over the cap a long foreground command stays in the foreground instead of auto-backgrounding", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "sbg-cap2-"));
+  const { id: sid, regDir } = uniqueSession();
+  const prevMs = process.env.PIFY_SHELL_BG_MS;
+  process.env.PIFY_SHELL_BG_MS = "200";
+  const h = harness();
+  const ctx = makeCtx(cwd, true, sid);
+  try {
+    mkdirSync(join(cwd, ".pi"), { recursive: true });
+    writeFileSync(join(cwd, ".pi", "shell-background.json"), JSON.stringify({ maxBackground: 1 }));
+    shellBackground(h.pi);
+    await h.handlers.get("session_start")!({ type: "session_start", reason: "startup" }, ctx);
+    const bash = h.tools.get("bash")!;
+
+    const parked = await bash.execute("t1", { command: "sleep 3", background: true }, undefined, undefined, ctx);
+    assert.ok(parked.details.id);
+
+    // Outlives the 200ms threshold, but the cap is full: it must NOT move to the
+    // background — it runs to completion in the foreground and says why.
+    const res = await bash.execute("t2", { command: "sleep 1" }, undefined, undefined, ctx);
+    assert.equal(res.details.background, false, "not backgrounded");
+    assert.equal(res.details.status, "done");
+    assert.match(String(res.content[0].text), /kept in the foreground/);
+  } finally {
+    await teardown(h, ctx);
+    await rmDir(cwd);
+    await rmDir(regDir);
+    if (prevMs === undefined) delete process.env.PIFY_SHELL_BG_MS;
+    else process.env.PIFY_SHELL_BG_MS = prevMs;
   }
 });
 

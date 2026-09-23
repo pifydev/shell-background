@@ -53,11 +53,14 @@ Put these in `.pi/shell-background.json` (project) or `<agentDir>/shell-backgrou
 ```json
 {
   "autoBackgroundMs": 30000,
-  "tailBytes": 65536
+  "tailBytes": 65536,
+  "maxBackground": 8
 }
 ```
 
-`autoBackgroundMs` is how long a foreground command may run before it auto-backgrounds; set it to `0` to disable auto-background (explicit `background: true` still works). `PIFY_SHELL_BG_MS` overrides it for one run or in CI. `tailBytes` bounds how much of a job's log a status result shows. Bad values fall back to the defaults with a warning rather than taking the tool down.
+`autoBackgroundMs` is how long a foreground command may run before it auto-backgrounds; set it to `0` to disable auto-background (explicit `background: true` still works). `PIFY_SHELL_BG_MS` overrides it for one run or in CI. `tailBytes` bounds how much of a job's log a status result shows. `maxBackground` bounds how many jobs may be alive at once: over it, a `background: true` request is refused with a message naming the limit (the command can still run in the foreground), and a command that crosses the auto-background threshold simply stays in the foreground instead of moving — a command is never refused, only the decision to background it. Bad values fall back to the defaults with a warning rather than taking the tool down.
+
+The tail a result carries is cleaned the way pi's own bash cleans what the model sees — ANSI escapes, control characters and carriage-return progress frames stripped — so a chatty build or dev server does not spend tokens on colour codes and thousands of overwritten progress lines. The log file on disk keeps every byte.
 
 ## Coexistence with @pify/pretty
 

@@ -4,6 +4,7 @@
  */
 import type { Job } from "./types.ts";
 import { readTail, countLines } from "./tail.ts";
+import { sanitizeOutput } from "./sanitize.ts";
 
 function secs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -38,14 +39,17 @@ export function header(job: Job): string {
  */
 export function formatResult(job: Job, tailBytes: number): string {
   const tail = readTail(job.logPath, tailBytes);
+  // Cleaned the way pi's own bash cleans its output for the model; the log on
+  // disk (which the truncation note points at) keeps every byte.
+  const text = sanitizeOutput(tail.text);
   const lines = [header(job)];
-  if (tail.text.trim() === "") {
+  if (text.trim() === "") {
     lines.push(job.status === "running" ? "(no output yet)" : "(no output)");
   } else {
     if (tail.truncated) {
-      lines.push(`… showing the last ${countLines(tail.text)} lines — full log: ${job.logPath}`);
+      lines.push(`… showing the last ${countLines(text)} lines — full log: ${job.logPath}`);
     }
-    lines.push(tail.text.replace(/\n+$/, ""));
+    lines.push(text.replace(/\n+$/, ""));
   }
   return lines.join("\n");
 }

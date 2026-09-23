@@ -27,6 +27,15 @@ test("out-of-range and wrong-type values fall back with a warning", () => {
   assert.ok(warnings.some((w) => w.includes("must be a number")));
 });
 
+test("maxBackground defaults to 8 and clamps to 1–64", () => {
+  assert.equal(resolveSettings(undefined, {}).settings.maxBackground, 8);
+  assert.equal(resolveSettings({ maxBackground: 3 }, {}).settings.maxBackground, 3);
+  const low = resolveSettings({ maxBackground: 0 }, {});
+  assert.equal(low.settings.maxBackground, 1);
+  assert.ok(low.warnings.some((w) => w.includes("maxBackground")));
+  assert.equal(resolveSettings({ maxBackground: 1000 }, {}).settings.maxBackground, 64);
+});
+
 test("unknown keys warn and are ignored", () => {
   const { warnings } = resolveSettings({ nope: 1 }, {});
   assert.ok(warnings.some((w) => w.includes('unknown setting "nope"')));

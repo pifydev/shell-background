@@ -14,11 +14,21 @@ export interface ShellBgSettings {
   autoBackgroundMs: number;
   /** Bytes of the log tail shown in a status/collect result. */
   tailBytes: number;
+  /**
+   * How many jobs may be alive at once before a request to background one
+   * more is refused and an auto-background transition is skipped. Every live
+   * job is a whole process tree plus an open log; a session that keeps
+   * starting servers and watchers should hear about it rather than
+   * accumulate them without bound. Only the backgrounding decision is capped
+   * — a command itself is never refused.
+   */
+  maxBackground: number;
 }
 
 export const DEFAULT_SETTINGS: ShellBgSettings = {
   autoBackgroundMs: 30_000,
   tailBytes: 64 * 1024,
+  maxBackground: 8,
 };
 
 const LIMITS: Record<keyof ShellBgSettings, { min: number; max: number }> = {
@@ -26,6 +36,7 @@ const LIMITS: Record<keyof ShellBgSettings, { min: number; max: number }> = {
   // does not make every command look long-running.
   autoBackgroundMs: { min: 0, max: 3_600_000 },
   tailBytes: { min: 1024, max: 4 * 1024 * 1024 },
+  maxBackground: { min: 1, max: 64 },
 };
 
 export function resolveSettings(
