@@ -69,3 +69,18 @@ test("buildEnv degrades to plain env when a stale ctx throws", () => {
   assert.equal(env.PI_SESSION_ID, undefined, "no session id, but no crash either");
   assert.equal(env.PATH, `/agent/bin${delimiter}/usr/bin`, "PATH is still built");
 });
+
+test("buildEnv hardens the child against interactive hangs, without the watcher-breaking flags", () => {
+  const env = buildEnv({}, "", { PATH: "/bin", EDITOR: "vim", GIT_PAGER: "delta" });
+  // Forced: an inherited interactive editor/prompt setting never survives.
+  assert.equal(env.GIT_TERMINAL_PROMPT, "0");
+  assert.equal(env.GIT_EDITOR, "true");
+  assert.equal(env.EDITOR, "true");
+  assert.equal(env.VISUAL, "true");
+  // Defaults under the base: an explicit pager wins, an absent one is cat.
+  assert.equal(env.GIT_PAGER, "delta");
+  assert.equal(env.PAGER, "cat");
+  // Never set: dev servers and watchers read these.
+  assert.equal(env.CI, undefined);
+  assert.equal(env.TERM, undefined);
+});

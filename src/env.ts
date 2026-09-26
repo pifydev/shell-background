@@ -17,6 +17,37 @@
  */
 import { delimiter } from "node:path";
 
+/**
+ * Defaults that keep an unattended child from waiting on a human. FORCED —
+ * they win over the inherited value — because a background job has no one
+ * to answer: `git commit` without -m must not open $EDITOR, `git fetch` over
+ * https must not prompt for a password. With stdin ignored such a prompt
+ * either hangs forever or sits until the tree is killed, and while it waits
+ * it holds one of the maxBackground slots. (Set from oh-my-pi's
+ * non-interactive-env; the editor becomes `true`, which exits 0 with the
+ * message untouched, so git aborts with "empty commit message" instead.)
+ */
+export const NON_INTERACTIVE_FORCED: Readonly<Record<string, string>> = {
+  GIT_TERMINAL_PROMPT: "0",
+  GIT_EDITOR: "true",
+  EDITOR: "true",
+  VISUAL: "true",
+};
+
+/**
+ * Formatting-only defaults, applied UNDER the inherited env so an explicit
+ * value still wins: a pager only ever changes how output is shown, and to a
+ * pipe it is dead weight. Deliberately NOT here: CI=true and TERM=dumb —
+ * this package also runs dev servers and watchers, and those flags make many
+ * of them drop watch mode, change ports or strip the output the user wants.
+ */
+export const NON_INTERACTIVE_DEFAULTS: Readonly<Record<string, string>> = {
+  PAGER: "cat",
+  GIT_PAGER: "cat",
+  GH_PAGER: "cat",
+  LESS: "FRX",
+};
+
 /** The slice of the pi ExtensionContext this needs, kept structural for tests. */
 export interface EnvCtx {
   sessionManager?: { getSessionId?(): string; getSessionFile?(): string | undefined };
@@ -25,16 +56,18 @@ export interface EnvCtx {
 }
 
 /**
- * Copy `base`, prepend `binDir` to PATH when absent, and set the PI_* session
- * variables from `ctx`. The ctx reads are wrapped so a stale ctx after a
- * `/reload` degrades to plain env rather than failing the spawn.
+ * Copy `base`, prepend `binDir` to PATH when absent, set the PI_* session
+ * variables from `ctx`, and layer the non-interactive defaults (formatting
+ * ones under the base, the anti-hang ones over it). The ctx reads are
+ * wrapped so a stale ctx after a `/reload` degrades to plain env rather than
+ * failing the spawn.
  */
 export function buildEnv(
   ctx: EnvCtx,
   binDir: string,
   base: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...base };
+  const env: NodeJS.ProcessEnv = { ...NON_INTERACTIVE_DEFAULTS, ...base, ...NON_INTERACTIVE_FORCED };
 
   // PATH is case-insensitive on Windows; find the real key so we do not create a
   // second, ignored "PATH" alongside an inherited "Path". Only prepend when the
