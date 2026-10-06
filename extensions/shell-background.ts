@@ -229,6 +229,18 @@ export default function shellBackground(pi: ExtensionAPI) {
     );
   }
 
+  /**
+   * Jobs a shell_status wait is blocking on, by id. Seen on pi 1.0.4 with the
+   * TUI captured: a foreground command auto-backgrounds at 30s, the model
+   * waits on it with shell_status, the exit handler delivers the finish as a
+   * follow-up in the same instant the wait returns it, and the model spends a
+   * whole extra turn acknowledging a result it had just reported. While a
+   * wait is active the finish is returned there and marked collected; the
+   * delivery path stands down.
+   */
+  const waiters = new Map<string, number>();
+  const awaited = (job: Job): boolean => (waiters.get(job.id) ?? 0) > 0;
+
   /** Deliver a finished background job into the conversation, once. */
   function scheduleDelivery(job: Job, exit: Promise<unknown>): void {
     exit
@@ -241,7 +253,7 @@ export default function shellBackground(pi: ExtensionAPI) {
           registry?.persist(job);
           return;
         }
-        if (job.delivered) return;
+        if (job.delivered || awaited(job)) return;
         job.delivered = true;
         registry?.persist(job);
         deliver(job);
@@ -522,7 +534,22 @@ export default function shellBackground(pi: ExtensionAPI) {
       const waitSec = Number.isFinite(params.wait) ? Math.min(300, Math.max(0, Math.floor(params.wait as number))) : 0;
       if (waitSec > 0 && job.status === "running") {
         const deadline = Date.now() + waitSec * 1000;
-        while (job.status === "running" && Date.now() < deadline && !sig?.aborted) await sleep(250);
+        waiters.set(job.id, (waiters.get(job.id) ?? 0) + 1);
+        try {
+          while (job.status === "running" && Date.now() < deadline && !sig?.aborted) await sleep(250);
+        } finally {
+          waiters.set(job.id, Math.max(0, (waiters.get(job.id) ?? 1) - 1));
+        }
+      }
+      if (sig?.aborted) {
+        // The model never sees an aborted tool result. If the job finished
+        // while this wait held the delivery path back, deliver it now.
+        if (isFinished(job) && !job.delivered) {
+          job.delivered = true;
+          registry.persist(job);
+          deliver(job);
+        }
+        return { content: [{ type: "text", text: `shell_status ${job.id}: wait aborted` }], details: { id: job.id }, isError: true };
       }
       // Reading a finished job marks it collected so it will not also be
       // delivered unasked. A still-running poll must never do this: setting
@@ -614,7 +641,7 @@ export default function shellBackground(pi: ExtensionAPI) {
           }
         }
         if (job.status === "running") anyRunning = true;
-        else if (!job.delivered) {
+        else if (!job.delivered && !awaited(job)) {
           job.delivered = true;
           registry.persist(job);
           deliver(job);

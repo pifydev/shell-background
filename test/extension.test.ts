@@ -412,6 +412,11 @@ test("shell_status wait blocks until a running job finishes (finding f075)", asy
     const res = await h.tools.get("shell_status")!.execute("w", { id: jobId, wait: 10 });
     assert.notEqual(res.details.status, "running", "wait blocked until the job finished");
     assert.ok(Date.now() - t0 >= 500, "and it actually waited for it");
+    // The wait returned the finish, so it is not ALSO delivered as a follow-up
+    // (seen on pi 1.0.4: the model spent a turn acknowledging what it had just
+    // reported). Give the exit handler and delivery a moment to misfire.
+    await sleep(1500);
+    assert.equal(h.sent.length, 0, "a result returned by a wait is not delivered a second time");
   } finally {
     await teardown(h, ctx);
     await rmDir(cwd);

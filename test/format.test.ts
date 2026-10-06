@@ -28,7 +28,7 @@ test("header states id, status, verdict and duration", () => {
   assert.match(header(job()), /^\[bg-1 · done · exit 0 · 4\.2s\]$/);
   assert.match(header(job({ status: "failed", exitCode: 1 })), /failed · exit 1/);
   assert.match(header(job({ status: "killed", exitCode: null, signal: "SIGKILL" })), /killed · signal SIGKILL/);
-  assert.match(header(job({ status: "running", endedAt: null, exitCode: null })), /running · running/);
+  assert.match(header(job({ status: "running", endedAt: null, exitCode: null })), /^\[bg-1 · running · [^·]+\]$/, "no verdict while running");
 });
 
 test("formatResult shows the header and the output tail", () => {

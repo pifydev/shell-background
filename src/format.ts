@@ -17,12 +17,11 @@ function duration(job: Job): string {
   return secs(Math.max(0, end - job.startedAt));
 }
 
-/** `[bg-1 · done · exit 0 · 4.2s]` — the one-line header every result carries. */
+/** `[bg-1 · done · exit 0 · 4.2s]` — the one-line header every result carries. A running job has no verdict yet: `[bg-1 · running · 13.2s]`. */
 export function header(job: Job): string {
+  if (job.status === "running") return `[${job.id} · running · ${duration(job)}]`;
   const verdict =
-    job.status === "running"
-      ? "running"
-      : job.status === "orphaned"
+    job.status === "orphaned"
         ? "orphaned (another session)"
         : job.signal
           ? `signal ${job.signal}`
