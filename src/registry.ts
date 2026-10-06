@@ -44,7 +44,8 @@ export class JobRegistry {
 
   constructor(baseDir: string) {
     this.baseDir = baseDir;
-    mkdirSync(join(baseDir, "logs"), { recursive: true });
+    // Logs and sidecars carry command output and cwd paths: the user's eyes only.
+    mkdirSync(join(baseDir, "logs"), { recursive: true, mode: 0o700 });
   }
 
   /** The directory this registry's sidecars and logs live under. */
@@ -93,7 +94,7 @@ export class JobRegistry {
     try {
       const file = join(this.baseDir, `${job.id}.json`);
       const tmp = `${file}.${process.pid}.tmp`;
-      writeFileSync(tmp, JSON.stringify(job));
+      writeFileSync(tmp, JSON.stringify(job), { mode: 0o600 });
       renameSync(tmp, file);
     } catch {
       // A registry we cannot persist still works for the live session.

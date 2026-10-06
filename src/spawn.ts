@@ -40,7 +40,9 @@ export function spawnToFile(
   logPath: string,
 ): Spawned {
   // Append so a re-attach or racing read never clips output already written.
-  const out = createWriteStream(logPath, { flags: "a" });
+  // Command output can carry private data, so the log is readable by the user
+  // only (pi 1.0.3 does the same for its own output files; a no-op on Windows).
+  const out = createWriteStream(logPath, { flags: "a", mode: 0o600 });
   // A write stream with no 'error' listener turns any disk error (ENOSPC,
   // EACCES) or a stray write-after-end into an uncaught exception that takes the
   // whole pi host down. Losing a log line is survivable; crashing the host is

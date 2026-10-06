@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sanitizeOutput, stripAnsi } from "../src/sanitize.ts";
@@ -34,7 +34,7 @@ test("formatResult hands the model a cleaned tail while the log on disk keeps ev
     assert.ok(!text.includes("\u001B"), text);
     assert.ok(!text.includes("\r"), text);
     assert.ok(text.endsWith("warn first\nprogress 100%"), text);
-    assert.equal(require("node:fs").readFileSync(logPath, "utf8"), raw, "the on-disk log is untouched");
+    assert.equal(readFileSync(logPath, "utf8"), raw, "the on-disk log is untouched");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
